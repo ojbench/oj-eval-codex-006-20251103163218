@@ -3,68 +3,232 @@
 
 #include <iostream>
 #include <utility>
+#include <vector>
+#include <queue>
+#include <cstring>
+#include <random>
+#include <algorithm>
 
-extern int rows;         // The count of rows of the game map.
-extern int columns;      // The count of columns of the game map.
-extern int total_mines;  // The count of mines of the game map.
+extern int rows;
+extern int columns;
+extern int total_mines;
 
-// You MUST NOT use any other external variables except for rows, columns and total_mines.
+// Global variables for client
+namespace client_ns {
+  constexpr int MAXN = 35;
+  char map[MAXN][MAXN];
+  int unknown_count[MAXN][MAXN];
+  int marked_count[MAXN][MAXN];
+  std::mt19937 rng;
+}
 
-/**
- * @brief The definition of function Execute(int, int, bool)
- *
- * @details This function is designed to take a step when player the client's (or player's) role, and the implementation
- * of it has been finished by TA. (I hope my comments in code would be easy to understand T_T) If you do not understand
- * the contents, please ask TA for help immediately!!!
- *
- * @param r The row coordinate (0-based) of the block to be visited.
- * @param c The column coordinate (0-based) of the block to be visited.
- * @param type The type of operation to a certain block.
- * If type == 0, we'll execute VisitBlock(row, column).
- * If type == 1, we'll execute MarkMine(row, column).
- * If type == 2, we'll execute AutoExplore(row, column).
- * You should not call this function with other type values.
- */
 void Execute(int r, int c, int type);
 
-/**
- * @brief The definition of function InitGame()
- *
- * @details This function is designed to initialize the game. It should be called at the beginning of the game, which
- * will read the scale of the game map and the first step taken by the server (see README).
- */
 void InitGame() {
-  // TODO (student): Initialize all your global variables!
+  memset(client_ns::map, '?', sizeof(client_ns::map));
+  memset(client_ns::unknown_count, 0, sizeof(client_ns::unknown_count));
+  memset(client_ns::marked_count, 0, sizeof(client_ns::marked_count));
+  client_ns::rng.seed(std::random_device{}());
+  
   int first_row, first_column;
   std::cin >> first_row >> first_column;
   Execute(first_row, first_column, 0);
 }
 
-/**
- * @brief The definition of function ReadMap()
- *
- * @details This function is designed to read the game map from stdin when playing the client's (or player's) role.
- * Since the client (or player) can only get the limited information of the game map, so if there is a 3 * 3 map as
- * above and only the block (2, 0) has been visited, the stdin would be
- *     ???
- *     12?
- *     01?
- */
 void ReadMap() {
-  // TODO (student): Implement me!
+  for (int i = 0; i < rows; i++) {
+    std::string line;
+    std::cin >> line;
+    for (int j = 0; j < columns; j++) {
+      client_ns::map[i][j] = line[j];
+    }
+  }
+  
+  // Update neighbor counts
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      client_ns::unknown_count[i][j] = 0;
+      client_ns::marked_count[i][j] = 0;
+      
+      if (client_ns::map[i][j] >= '0' && client_ns::map[i][j] <= '8') {
+        for (int di = -1; di <= 1; di++) {
+          for (int dj = -1; dj <= 1; dj++) {
+            if (di == 0 && dj == 0) continue;
+            int ni = i + di, nj = j + dj;
+            if (ni >= 0 && ni < rows && nj >= 0 && nj < columns) {
+              if (client_ns::map[ni][nj] == '?') {
+                client_ns::unknown_count[i][j]++;
+              } else if (client_ns::map[ni][nj] == '@') {
+                client_ns::marked_count[i][j]++;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
-/**
- * @brief The definition of function Decide()
- *
- * @details This function is designed to decide the next step when playing the client's (or player's) role. Open up your
- * mind and make your decision here! Caution: you can only execute once in this function.
- */
 void Decide() {
-  // TODO (student): Implement me!
-  // while (true) {
-  //   Execute(0, 0);
-  // }
+  using namespace client_ns;
+  
+  // Phase 1: Mark certain mines and auto-explore
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (map[i][j] >= '0' && map[i][j] <= '8') {
+        int mine_count = map[i][j] - '0';
+        int remaining = mine_count - marked_count[i][j];
+        
+        // All unknowns must be mines
+        if (remaining > 0 && remaining == unknown_count[i][j]) {
+          for (int di = -1; di <= 1; di++) {
+            for (int dj = -1; dj <= 1; dj++) {
+              if (di == 0 && dj == 0) continue;
+              int ni = i + di, nj = j + dj;
+              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map[ni][nj] == '?') {
+                Execute(ni, nj, 1);
+                return;
+              }
+            }
+          }
+        }
+        
+        // All mines marked, auto-explore
+        if (marked_count[i][j] == mine_count && unknown_count[i][j] > 0) {
+          Execute(i, j, 2);
+          return;
+        }
+      }
+    }
+  }
+  
+  // Phase 2: Advanced reasoning
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (map[i][j] < '0' || map[i][j] > '8') continue;
+      
+      int mc1 = map[i][j] - '0';
+      int rem1 = mc1 - marked_count[i][j];
+      if (rem1 == 0 || unknown_count[i][j] == 0) continue;
+      
+      std::vector<std::pair<int,int>> unk1;
+      for (int di = -1; di <= 1; di++) {
+        for (int dj = -1; dj <= 1; dj++) {
+          if (di == 0 && dj == 0) continue;
+          int ni = i + di, nj = j + dj;
+          if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map[ni][nj] == '?') {
+            unk1.push_back({ni, nj});
+          }
+        }
+      }
+      
+      // Check adjacent cells
+      for (int ii = i - 2; ii <= i + 2; ii++) {
+        for (int jj = j - 2; jj <= j + 2; jj++) {
+          if (ii < 0 || ii >= rows || jj < 0 || jj >= columns) continue;
+          if (ii == i && jj == j) continue;
+          if (map[ii][jj] < '0' || map[ii][jj] > '8') continue;
+          
+          int mc2 = map[ii][jj] - '0';
+          int rem2 = mc2 - marked_count[ii][jj];
+          
+          std::vector<std::pair<int,int>> unk2;
+          for (int di = -1; di <= 1; di++) {
+            for (int dj = -1; dj <= 1; dj++) {
+              if (di == 0 && dj == 0) continue;
+              int ni = ii + di, nj = jj + dj;
+              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map[ni][nj] == '?') {
+                unk2.push_back({ni, nj});
+              }
+            }
+          }
+          
+          // Find difference
+          std::vector<std::pair<int,int>> diff;
+          for (auto& p : unk2) {
+            if (std::find(unk1.begin(), unk1.end(), p) == unk1.end()) {
+              diff.push_back(p);
+            }
+          }
+          
+          if (diff.empty()) continue;
+          
+          // Check if unk1 is subset of unk2
+          bool subset = true;
+          for (auto& p : unk1) {
+            if (std::find(unk2.begin(), unk2.end(), p) == unk2.end()) {
+              subset = false;
+              break;
+            }
+          }
+          
+          if (!subset) continue;
+          
+          // If same mine count, diff is safe
+          if (rem2 == rem1) {
+            Execute(diff[0].first, diff[0].second, 0);
+            return;
+          }
+          
+          // If diff size matches remaining, diff is all mines
+          if (rem2 == rem1 + (int)diff.size()) {
+            Execute(diff[0].first, diff[0].second, 1);
+            return;
+          }
+        }
+      }
+    }
+  }
+  
+  // Phase 3: Pick safest cell (prefer cells with more revealed neighbors)
+  int best_score = -1;
+  std::vector<std::pair<int,int>> candidates;
+  
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (map[i][j] != '?') continue;
+      
+      int score = 0;
+      for (int di = -1; di <= 1; di++) {
+        for (int dj = -1; dj <= 1; dj++) {
+          if (di == 0 && dj == 0) continue;
+          int ni = i + di, nj = j + dj;
+          if (ni >= 0 && ni < rows && nj >= 0 && nj < columns) {
+            if (map[ni][nj] >= '0' && map[ni][nj] <= '8') score++;
+          }
+        }
+      }
+      
+      if (score > best_score) {
+        best_score = score;
+        candidates.clear();
+        candidates.push_back({i, j});
+      } else if (score == best_score) {
+        candidates.push_back({i, j});
+      }
+    }
+  }
+  
+  if (!candidates.empty()) {
+    std::uniform_int_distribution<> dist(0, candidates.size() - 1);
+    auto cell = candidates[dist(rng)];
+    Execute(cell.first, cell.second, 0);
+    return;
+  }
+  
+  // Fallback: random unknown
+  std::vector<std::pair<int,int>> all_unknown;
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (map[i][j] == '?') all_unknown.push_back({i, j});
+    }
+  }
+  
+  if (!all_unknown.empty()) {
+    std::uniform_int_distribution<> dist(0, all_unknown.size() - 1);
+    auto cell = all_unknown[dist(rng)];
+    Execute(cell.first, cell.second, 0);
+  }
 }
 
 #endif
